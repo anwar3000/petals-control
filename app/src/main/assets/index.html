@@ -407,6 +407,16 @@ const defUrl = 'mqtt://192.168.10.5:1883';   // local MQTT broker (plain TCP, ha
 let devices = store.get('rc.devices', null) || JSON.parse(JSON.stringify(DEFAULT_DEVICES));
 let cfg = Object.assign({room:'Villa 21', url:defUrl, user:'', pass:'', base:'o2/villa/21'}, store.get('rc.cfg', {}));
 if(/^ws:\/\/192\.168\.10\.5:(1880\/mqtt|9001)$/.test(cfg.url)) cfg.url = defUrl;   // migrate old default
+/* In the app: plain MQTT for bare host[:port], tcp/mqtt URLs, or anything pointing at port 1883 */
+function appUrl(url){
+  url = (url || '').trim();
+  if(!window.Android || !url) return url;
+  if(!/^[a-z]+:\/\//i.test(url)) url = 'mqtt://' + url;
+  const m = url.match(/^wss?:\/\/([^:\/]+):(1883|8883)(\/.*)?$/i);
+  if(m) url = 'mqtt://' + m[1] + ':' + m[2];
+  return url;
+}
+cfg.url = appUrl(cfg.url);
 const power = {};      // ch -> 'ON' | 'OFF'
 const pending = {};    // ch -> timeout id
 let client = null, editing = false, editIdx = -1, draft = null;
@@ -504,6 +514,7 @@ function setDev(txt){
 function connect(){
   if(client){ try{ client.end(true); }catch(e){} client = null; }
   if(!cfg.url){ setConn('off','Set up broker'); openSettings(); return; }
+  cfg.url = appUrl(cfg.url); lastToast = '';
   const tcp = /^(mqtt|tcp):\/\//i.test(cfg.url);
   if(tcp && !window.Android){ setConn('error','Needs ws:// in browser'); toast('Browsers can only use a ws:// WebSocket URL'); return; }
   if(!tcp && !window.mqtt){ setConn('error','MQTT library not loaded'); toast('MQTT library missing — rebuild the app'); return; }
@@ -516,16 +527,18 @@ function connect(){
   try{ client = tcp ? nativeClient(cfg.url, opts) : mqtt.connect(cfg.url, opts); }
   catch(e){ setConn('error','Bad URL'); toast(e.message); return; }
   client.on('connect', ()=>{
-    setConn('on','Connected');
+    setConn('on','Connected'); lastToast = '';
     const b = cfg.base;
     client.subscribe([`stat/${b}/+`, `tele/${b}/STATE`, `tele/${b}/LWT`]);
     client.publish(`cmnd/${b}/STATE`, '');   // ask Tasmota for all relay states
   });
   client.on('reconnect', ()=>setConn('wait','Reconnecting…'));
   client.on('offline', ()=>setConn('off','Offline'));
-  client.on('error', e=>{ const m = e && e.message ? e.message : 'Error'; setConn('error', m.length>34 ? m.slice(0,32)+'…' : m); });
+  client.on('error', e=>{ const m = e && e.message ? e.message : 'Error'; setConn('error', m.length>34 ? m.slice(0,32)+'…' : m);
+    if(m !== lastToast){ lastToast = m; toast('MQTT: ' + m); } });
   client.on('message', onMsg);
 }
+let lastToast = '';
 /* Native MQTT (Android app, plain TCP 1883) with the same interface as mqtt.js */
 function nativeClient(url, o){
   const u = url.match(/^(?:mqtt|tcp):\/\/([^:\/]+)(?::(\d+))?/i);
