@@ -20,7 +20,7 @@ Commands: `cmnd/o2/villa/21/POWERn` (ON / OFF / TOGGLE) · Status: `stat/o2/vill
 The Android app connects **directly to plain MQTT** at **mqtt://192.168.10.5:1883** (built-in native MQTT client — no WebSocket listener needed).
 Change it in ⚙ Settings → Broker URL. Enter username/password there if your broker needs them.
 
-The *browser* version (room-control.html) can't open raw TCP, so it needs a WebSocket URL (`ws://host:port`) —
+The *browser* version (room-control.html) can't open raw TCP, so it needs a WebSocket URL (`ws://192.168.10.5:1884`) —
 e.g. Mosquitto `listener 9001` + `protocol websockets`.
 
 ## 2. Build the APK (no Android Studio needed)
