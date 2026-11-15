@@ -328,11 +328,11 @@ code{font-size:12px;background:rgba(255,255,255,.07);padding:1px 6px;border-radi
 <div class="ov" id="setOv">
   <div class="sheet">
     <h2>Settings</h2>
-    <p class="sub">MQTT broker over WebSockets (Mosquitto listener with <code>protocol websockets</code>).</p>
+    <p class="sub">App: <code>mqtt://192.168.10.5:1883</code> (plain MQTT). Browser version needs a WebSocket URL like <code>ws://host:9001</code>.</p>
     <label>Room name</label>
     <input id="sRoom" placeholder="Villa 21">
-    <label>Broker WebSocket URL</label>
-    <input id="sUrl" placeholder="ws://192.168.1.10:9001">
+    <label>Broker URL</label>
+    <input id="sUrl" placeholder="mqtt://192.168.10.5:1883">
     <div class="row">
       <div><label>Username</label><input id="sUser" autocomplete="off"></div>
       <div><label>Password</label><input id="sPass" type="password" autocomplete="off"></div>
@@ -403,9 +403,10 @@ const store = {
   get(k,d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
-const defUrl = 'ws://192.168.10.5:1880/mqtt';   // local Mosquitto / Node-RED server
+const defUrl = 'mqtt://192.168.10.5:1883';   // local MQTT broker (plain TCP, handled natively by the app)
 let devices = store.get('rc.devices', null) || JSON.parse(JSON.stringify(DEFAULT_DEVICES));
 let cfg = Object.assign({room:'Villa 21', url:defUrl, user:'', pass:'', base:'o2/villa/21'}, store.get('rc.cfg', {}));
+if(/^ws:\/\/192\.168\.10\.5:(1880\/mqtt|9001)$/.test(cfg.url)) cfg.url = defUrl;   // migrate old default
 const power = {};      // ch -> 'ON' | 'OFF'
 const pending = {};    // ch -> timeout id
 let client = null, editing = false, editIdx = -1, draft = null;
@@ -502,16 +503,18 @@ function setDev(txt){
 }
 function connect(){
   if(client){ try{ client.end(true); }catch(e){} client = null; }
-  if(!window.mqtt){ setConn('error','MQTT library not loaded'); toast('MQTT library missing — rebuild the app'); return; }
   if(!cfg.url){ setConn('off','Set up broker'); openSettings(); return; }
+  const tcp = /^(mqtt|tcp):\/\//i.test(cfg.url);
+  if(tcp && !window.Android){ setConn('error','Needs ws:// in browser'); toast('Browsers can only use a ws:// WebSocket URL'); return; }
+  if(!tcp && !window.mqtt){ setConn('error','MQTT library not loaded'); toast('MQTT library missing — rebuild the app'); return; }
   setConn('wait','Connecting…');
-  try{
-    client = mqtt.connect(cfg.url, {
-      username: cfg.user || undefined, password: cfg.pass || undefined,
-      clientId: 'roomctl_' + Math.random().toString(16).slice(2,10),
-      reconnectPeriod: 3000, connectTimeout: 8000, clean: true, keepalive: 30
-    });
-  }catch(e){ setConn('error','Bad URL'); toast(e.message); return; }
+  const opts = {
+    username: cfg.user || undefined, password: cfg.pass || undefined,
+    clientId: 'roomctl_' + Math.random().toString(16).slice(2,10),
+    reconnectPeriod: 3000, connectTimeout: 8000, clean: true, keepalive: 30
+  };
+  try{ client = tcp ? nativeClient(cfg.url, opts) : mqtt.connect(cfg.url, opts); }
+  catch(e){ setConn('error','Bad URL'); toast(e.message); return; }
   client.on('connect', ()=>{
     setConn('on','Connected');
     const b = cfg.base;
@@ -520,8 +523,33 @@ function connect(){
   });
   client.on('reconnect', ()=>setConn('wait','Reconnecting…'));
   client.on('offline', ()=>setConn('off','Offline'));
-  client.on('error', e=>setConn('error', e && e.message ? e.message.slice(0,30) : 'Error'));
+  client.on('error', e=>{ const m = e && e.message ? e.message : 'Error'; setConn('error', m.length>34 ? m.slice(0,32)+'…' : m); });
   client.on('message', onMsg);
+}
+/* Native MQTT (Android app, plain TCP 1883) with the same interface as mqtt.js */
+function nativeClient(url, o){
+  const u = url.match(/^(?:mqtt|tcp):\/\/([^:\/]+)(?::(\d+))?/i);
+  if(!u) throw new Error('Use mqtt://host:1883');
+  const host = u[1], port = +(u[2] || 1883), h = {};
+  const emit = (ev, ...a) => (h[ev]||[]).forEach(f=>{ try{ f(...a); }catch(e){ console.error(e); } });
+  const c = {
+    connected: false,
+    on(ev, fn){ (h[ev] = h[ev] || []).push(fn); return c; },
+    subscribe(t){ [].concat(t).forEach(x=>Android.mqttSubscribe(x)); return c; },
+    publish(t, p){ Android.mqttPublish(t, String(p)); return c; },
+    end(){ c.connected = false; if(window.__mq === handler) window.__mq = null; Android.mqttDisconnect(); },
+    reconnect(){ Android.mqttConnect(host, port, o.username||'', o.password||'', o.clientId||''); }
+  };
+  const handler = (ev, a, b) => {
+    if(ev==='connect'){ c.connected = true; emit('connect'); }
+    else if(ev==='close'){ c.connected = false; emit('close'); }
+    else if(ev==='reconnect') emit('reconnect');
+    else if(ev==='error') emit('error', new Error(a));
+    else if(ev==='message') emit('message', a, { toString: () => b });
+  };
+  window.__mq = handler;
+  setTimeout(()=>c.reconnect(), 0);
+  return c;
 }
 const norm = v => /^(on|1|true)$/i.test(String(v).trim()) ? 'ON' : /^(off|0|false)$/i.test(String(v).trim()) ? 'OFF' : null;
 function setPower(ch, val){

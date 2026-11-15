@@ -16,6 +16,8 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import org.json.JSONObject;
+
 /**
  * Villa 21 Room Control — wraps the bundled web UI (assets/index.html) in a full-screen WebView.
  * The page talks to the MQTT broker over WebSockets (ws://192.168.10.5:1880/mqtt by default).
@@ -23,6 +25,7 @@ import android.webkit.WebViewClient;
 public class MainActivity extends Activity {
 
     private WebView web;
+    private NativeMqtt mqtt;
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
@@ -45,6 +48,11 @@ public class MainActivity extends Activity {
 
         web.setWebViewClient(new WebViewClient());
         web.setWebChromeClient(new WebChromeClient());   // enables confirm()/alert() dialogs
+        // Native MQTT over TCP (port 1883) — events are forwarded to window.__mq(event, a, b) in the page
+        mqtt = new NativeMqtt((ev, a, b) -> runOnUiThread(() -> {
+            if (web != null) web.evaluateJavascript("window.__mq&&__mq(" + JSONObject.quote(ev) + ","
+                    + JSONObject.quote(a) + "," + JSONObject.quote(b) + ")", null);
+        }));
         web.addJavascriptInterface(new Bridge(), "Android");
 
         if (savedInstanceState != null) web.restoreState(savedInstanceState);
@@ -68,6 +76,14 @@ public class MainActivity extends Activity {
                 else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
             });
         }
+
+        @JavascriptInterface public void mqttConnect(String host, int port, String user, String pass, String clientId) {
+            mqtt.connect(host, port, user, pass, clientId);
+        }
+        @JavascriptInterface public void mqttPublish(String topic, String payload) { mqtt.publish(topic, payload); }
+        @JavascriptInterface public void mqttSubscribe(String topic) { mqtt.subscribe(topic); }
+        @JavascriptInterface public void mqttDisconnect() { mqtt.disconnect(); }
+        @JavascriptInterface public boolean mqttConnected() { return mqtt.isConnected(); }
 
         @JavascriptInterface
         public String version() {
@@ -108,6 +124,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (mqtt != null) mqtt.disconnect();
         if (web != null) web.destroy();
         super.onDestroy();
     }

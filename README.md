@@ -15,15 +15,13 @@ Touch control panel for Villa 21 — room-plan view + button view, live status f
 
 Commands: `cmnd/o2/villa/21/POWERn` (ON / OFF / TOGGLE) · Status: `stat/o2/villa/21/POWERn`, `stat/…/RESULT`, `tele/…/LWT`
 
-## 1. Broker: MQTT over WebSockets (one time)
+## 1. Broker
 
-The app connects to **ws://192.168.10.5:1880/mqtt** (changeable in ⚙ Settings → Broker WebSocket URL).
+The Android app connects **directly to plain MQTT** at **mqtt://192.168.10.5:1883** (built-in native MQTT client — no WebSocket listener needed).
+Change it in ⚙ Settings → Broker URL. Enter username/password there if your broker needs them.
 
-**Aedes broker in Node-RED (port 1880):** open the Aedes node → WebSocket → *Bind to: Path* → `/mqtt` → Deploy.
-The broker is then reachable at `ws://192.168.10.5:1880/mqtt`. If you use a different path, enter it in the app.
-(If you chose *Bind to: Port* instead, e.g. 8080, use `ws://192.168.10.5:8080`.)
-
-**Mosquitto instead:** add `listener 9001` + `protocol websockets` to mosquitto.conf, restart, and use `ws://192.168.10.5:9001`.
+The *browser* version (room-control.html) can't open raw TCP, so it needs a WebSocket URL (`ws://host:port`) —
+e.g. Mosquitto `listener 9001` + `protocol websockets`.
 
 ## 2. Build the APK (no Android Studio needed)
 
