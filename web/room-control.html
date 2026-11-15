@@ -7,8 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Villa 21 · Room Control</title>
-<!-- MQTT over WebSockets. For fully offline use, download this file and point src to the local copy. -->
-<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+<!-- MQTT over WebSockets: bundled copy first (added at build time), internet copy as fallback -->
+<script src="mqtt.min.js"></script>
+<script>window.mqtt || document.write('<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"><\/script>');</script>
 <style>
 :root{
   --bg:#070a12; --panel:rgba(255,255,255,.045); --line:rgba(255,255,255,.09);
@@ -171,6 +172,29 @@ body[data-view=grid] #roomView{display:none}
 .editing .spot .b{outline:2px dashed rgba(255,255,255,.55);outline-offset:4px}
 .spot.dragging{z-index:9}
 .spot.dragging .b{transform:scale(1.18);box-shadow:0 12px 30px rgba(0,0,0,.6)}
+.spot.strip{--s:42px}
+.spot.strip .b{border-radius:999px;gap:6px}
+.spot.strip.h .b{display:flex;align-items:center;justify-content:center}
+.spot.strip.v .b{display:flex;flex-direction:column;align-items:center;justify-content:center}
+.spot.strip .b::before{content:"";position:absolute;border-radius:999px;background:rgba(255,255,255,.1);transition:.35s}
+.spot.strip.h .b::before{left:16px;right:16px;height:3px;bottom:6px}
+.spot.strip.v .b::before{top:16px;bottom:16px;width:3px;right:6px}
+.spot.strip.on .b::before{background:rgba(255,255,255,.85);box-shadow:0 0 10px #fff}
+.spot.strip .b svg.i{width:24px;height:24px}
+.spot.strip.v .lb{top:auto;bottom:calc(100% + 6px)}
+.spot.strip.v .b svg.i{transform:rotate(90deg)}
+.spot.strip.on .b{box-shadow:0 0 0 5px color-mix(in srgb,var(--c) 25%,transparent),0 0 40px var(--c),0 0 80px color-mix(in srgb,var(--c) 50%,transparent)}
+.spot.strip.pending .b::after{border-radius:999px}
+.glow.line{aspect-ratio:auto;border-radius:50%;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 58%,transparent),color-mix(in srgb,var(--c) 20%,transparent) 55%,transparent)}
+.glow.line.h{height:30%}
+.glow.line.v{width:30%}
+.segs{display:flex;gap:6px}
+.segs button{flex:1;padding:11px 8px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);cursor:pointer;
+  font-size:13.5px;font-weight:600;color:var(--mute);display:flex;align-items:center;justify-content:center;gap:7px}
+.segs button.sel{background:#fff;color:#0b0f17;border-color:#fff}
+.segs i{display:inline-block;background:currentColor;border-radius:9px}
+input[type=range]{padding:0;height:34px;accent-color:#7dd3fc;background:none;border:0}
 .roomhint{font-size:12.5px;color:var(--mute);text-align:center;margin:-6px 0 14px}
 @keyframes breathe{50%{opacity:.55}}
 @media (max-width:600px){
@@ -220,6 +244,15 @@ select option{background:#0f1424}
 .hint{font-size:12px;color:var(--mute);margin-top:8px;line-height:1.5}
 code{font-size:12px;background:rgba(255,255,255,.07);padding:1px 6px;border-radius:6px}
 
+/* toggle row */
+.tgl{display:flex;align-items:center;gap:14px;margin:18px 0 0;padding:14px;border-radius:14px;border:1px solid var(--line);
+  background:rgba(255,255,255,.03);text-transform:none;letter-spacing:0;font-size:14px;color:var(--text);cursor:pointer}
+.tgl small{color:var(--mute);font-size:12px}
+.tgl input{display:none}
+.tk{width:46px;height:28px;border-radius:999px;background:rgba(255,255,255,.14);position:relative;flex:none;transition:.3s}
+.tk::after{content:"";position:absolute;top:4px;left:4px;width:20px;height:20px;border-radius:50%;background:#cbd5e1;transition:.3s}
+.tgl input:checked+.tk{background:#7dd3fc}
+.tgl input:checked+.tk::after{left:22px;background:#fff}
 /* toast */
 .toast{position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translate(-50%,30px);opacity:0;
   background:#fff;color:#0b0f17;padding:11px 18px;border-radius:999px;font-size:14px;font-weight:600;transition:.3s;z-index:60;
@@ -302,6 +335,14 @@ code{font-size:12px;background:rgba(255,255,255,.07);padding:1px 6px;border-radi
       <div><label>Group</label><select id="eZone"></select></div>
       <div><label>Relay channel</label><select id="eCh"></select></div>
     </div>
+    <label>Shape on room map</label>
+    <div class="segs" id="eShape">
+      <button data-shape=""><i style="width:14px;height:14px;border-radius:50%"></i>Round</button>
+      <button data-shape="h"><i style="width:26px;height:7px"></i>Strip</button>
+      <button data-shape="v"><i style="width:7px;height:22px"></i>Strip</button>
+    </div>
+    <div id="eLenRow"><label>Strip length — <span id="eLenV"></span>% of room</label>
+      <input type="range" id="eLen" min="10" max="94" step="1"></div>
     <label>Icon</label>
     <div class="icons" id="eIcons"></div>
     <label>Colour</label>
@@ -318,11 +359,11 @@ code{font-size:12px;background:rgba(255,255,255,.07);padding:1px 6px;border-radi
 <div class="ov" id="setOv">
   <div class="sheet">
     <h2>Settings</h2>
-    <p class="sub">MQTT broker over WebSockets (Mosquitto listener with <code>protocol websockets</code>).</p>
+    <p class="sub">App: <code>mqtt://192.168.10.5:1883</code> (plain MQTT). Browser version needs a WebSocket URL like <code>ws://192.168.10.5:1884</code>.</p>
     <label>Room name</label>
     <input id="sRoom" placeholder="Villa 21">
-    <label>Broker WebSocket URL</label>
-    <input id="sUrl" placeholder="ws://192.168.1.10:9001">
+    <label>Broker URL</label>
+    <input id="sUrl" placeholder="mqtt://192.168.10.5:1883">
     <div class="row">
       <div><label>Username</label><input id="sUser" autocomplete="off"></div>
       <div><label>Password</label><input id="sPass" type="password" autocomplete="off"></div>
@@ -330,6 +371,8 @@ code{font-size:12px;background:rgba(255,255,255,.07);padding:1px 6px;border-radi
     <label>Tasmota topic</label>
     <input id="sBase" placeholder="o2/villa/21">
     <div class="hint">Commands go to <code>cmnd/<span class="tb">o2/villa/21</span>/POWERn</code>, status is read from <code>stat/<span class="tb">o2/villa/21</span>/POWERn</code>, <code>…/RESULT</code> and <code>tele/…/LWT</code>.</div>
+    <label class="tgl" id="awakeRow"><input type="checkbox" id="sAwake"><span class="tk"></span>
+      <span><b>Keep screen on</b><br><small>Wall-panel mode: the screen never sleeps while the app is open</small></span></label>
     <div class="actions">
       <button class="btn danger" id="sReset">Reset buttons</button>
       <button class="btn" id="sCancel">Close</button>
@@ -347,10 +390,11 @@ const DEFAULT_DEVICES = [
   {ch:5, name:'Air Conditioner',   icon:'ac',        color:'#38bdf8', zone:'Climate',  x:84, y:10},
   {ch:2, name:'Ceiling Fan',       icon:'fan',       color:'#a78bfa', zone:'Climate',  x:50, y:33},
   {ch:4, name:'Projector',         icon:'projector', color:'#f472b6', zone:'Media',    x:50, y:65},
-  {ch:8, name:'Right Side Socket', icon:'socket',    color:'#34d399', zone:'Media',    x:94, y:52},
-  {ch:1, name:'Wall Light',        icon:'wall',      color:'#fbbf24', zone:'Lighting', x:6,  y:42},
-  {ch:3, name:'Floor Light Right', icon:'floor',     color:'#fb923c', zone:'Lighting', x:89, y:85},
-  {ch:7, name:'Floor Light Left',  icon:'floor',     color:'#fb923c', zone:'Lighting', x:11, y:85},
+  {ch:8, name:'Right Side Socket', icon:'socket',    color:'#34d399', zone:'Media',    x:93, y:30},
+  {ch:1, name:'Wall Light',        icon:'wall',      color:'#fbbf24', zone:'Lighting', x:7,  y:26},
+  /* shape: '' = round button, 'h' = horizontal strip, 'v' = vertical strip; len = strip length in % of the room */
+  {ch:3, name:'Floor Light Right', icon:'strip',     color:'#fb923c', zone:'Lighting', x:96, y:74, shape:'v', len:38},
+  {ch:7, name:'Floor Light Left',  icon:'strip',     color:'#fb923c', zone:'Lighting', x:4,  y:74, shape:'v', len:38},
   {ch:6, name:'Small Light Back',  icon:'bulb',      color:'#facc15', zone:'Lighting', x:50, y:92},
 ];
 const LIGHTS = new Set(['bulb','floor','wall','strip']);
@@ -377,7 +421,7 @@ const ICONS = {
   wall:`<g class="rays"><path d="M13 19.5l-1 2M17 19.5l1 2M21 18l1.5 1"/></g><path d="M3 4v16"/><path d="M3 12h4"/><path d="M8 7.5h7.5l4 9.5H7.5z"/>`,
   tv:`<rect x="2" y="4" width="20" height="13" rx="2.5"/><path d="M8 21h8M12 17v4"/>`,
   plug:`<path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/>`,
-  strip:`<path class="rays" d="M5 9V7M10 9V7M15 9V7M20 9V7"/><rect x="2" y="10" width="20" height="4" rx="2"/><path d="M5 17v-0M10 17v0"/>`,
+  strip:`<path class="rays" d="M5 8V6M10 8V6M15 8V6M20 8V6M5 18v-2M10 18v-2M15 18v-2M20 18v-2"/><rect x="2" y="10" width="20" height="4" rx="2"/><path d="M6 12h.01M10 12h.01M14 12h.01M18 12h.01"/>`,
   power:`<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>`,
   moon:`<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>`,
   speaker:`<rect x="5" y="2" width="14" height="20" rx="3"/><circle cx="12" cy="14" r="3.5"/><circle cx="12" cy="6.5" r="1"/>`,
@@ -391,10 +435,26 @@ const store = {
   get(k,d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
-const defUrl = /^http/.test(location.protocol) && location.hostname
-  ? `${location.protocol==='https:'?'wss':'ws'}://${location.hostname}:1884` : 'ws://192.168.10.5:1884';
+const defUrl = window.Android ? 'mqtt://192.168.10.5:1883'   // app: plain MQTT (native client)
+                              : 'ws://192.168.10.5:1884';   // browser: MQTT over WebSockets
 let devices = store.get('rc.devices', null) || JSON.parse(JSON.stringify(DEFAULT_DEVICES));
+if(!store.get('rc.v2', false)){            // one-time upgrade: floor lights become strips
+  devices.forEach(d=>{ const def = DEFAULT_DEVICES.find(x=>x.ch===d.ch);
+    if(def && def.shape && !d.shape) Object.assign(d, {shape:def.shape, len:def.len, icon:def.icon, x:def.x, y:def.y}); });
+  store.set('rc.devices', devices); store.set('rc.v2', true);
+}
 let cfg = Object.assign({room:'Villa 21', url:defUrl, user:'', pass:'', base:'o2/villa/21'}, store.get('rc.cfg', {}));
+if(/^ws:\/\/192\.168\.10\.5:(1880\/mqtt|9001)$/.test(cfg.url)) cfg.url = defUrl;   // migrate old default
+/* In the app: plain MQTT for bare host[:port], tcp/mqtt URLs, or anything pointing at port 1883 */
+function appUrl(url){
+  url = (url || '').trim();
+  if(!window.Android || !url) return url;
+  if(!/^[a-z]+:\/\//i.test(url)) url = 'mqtt://' + url;
+  const m = url.match(/^wss?:\/\/([^:\/]+):(1883|8883)(\/.*)?$/i);
+  if(m) url = 'mqtt://' + m[1] + ':' + m[2];
+  return url;
+}
+cfg.url = appUrl(cfg.url);
 const power = {};      // ch -> 'ON' | 'OFF'
 const pending = {};    // ch -> timeout id
 let client = null, editing = false, editIdx = -1, draft = null;
@@ -443,15 +503,28 @@ function pos(d){
 }
 const edge = v => `clamp(calc(var(--s)/2 + 9px), ${v}%, calc(100% - var(--s)/2 - 9px))`;
 function spotCls(d){
-  const p = pos(d), st = power[d.ch];
-  return ['spot', st==='ON'?'on':'', st?'':'unknown', pending[d.ch]?'pending':'',
-          p.y>72?'up':'', p.x<16?'l':'', p.x>84?'r':''].join(' ');
+  const p = pos(d), st = power[d.ch], sh = d.shape;
+  return ['spot', sh ? 'strip '+sh : '', st==='ON'?'on':'', st?'':'unknown', pending[d.ch]?'pending':'',
+          (!sh || sh==='h') && p.y>72 ? 'up' : '', p.x<16?'l':'', p.x>84?'r':''].join(' ');
 }
+/* position/size of a device on the map (strips get length, kept inside the room) */
+function place(d, x, y){
+  const p = x==null ? pos(d) : {x, y};
+  if(d.shape==='h' || d.shape==='v'){
+    const L = d.len || 40, half = L/2 + 1.5;
+    if(d.shape==='h') return {left: clamp(p.x, half, 100-half)+'%', top: edge(p.y), width: L+'%', height: ''};
+    return {left: edge(p.x), top: clamp(p.y, half, 100-half)+'%', width: '', height: L+'%'};
+  }
+  return {left: edge(p.x), top: edge(p.y), width: '', height: ''};
+}
+const css = o => Object.entries(o).filter(([k,v])=>v!=='').map(([k,v])=>`${k}:${v}`).join(';');
 function renderRoom(){
   $('#spots').innerHTML = devices.map((d,i)=>{ const p = pos(d);
-    return `<button class="${spotCls(d)}" data-i="${i}" data-ch="${d.ch}" style="--c:${d.color};left:${edge(p.x)};top:${edge(p.y)}" aria-label="${esc(d.name)}">
+    return `<button class="${spotCls(d)}" data-i="${i}" data-ch="${d.ch}" style="--c:${d.color};${css(place(d))}" aria-label="${esc(d.name)}">
       <span class="b">${icon(d.icon)}</span><span class="lb">${esc(d.name)}</span></button>`; }).join('');
   $('#glows').innerHTML = devices.map(d=>{ const p = pos(d);
+    if(d.shape && (LIGHTS.has(d.icon) || d.zone==='Lighting')){ const pl = place(d), L = (d.len||40) + 26;
+      return `<div class="glow line ${d.shape}" data-ch="${d.ch}" style="--c:${d.color};left:${pl.left};top:${pl.top};${d.shape==='h'?'width':'height'}:${L}%"></div>`; }
     if(LIGHTS.has(d.icon)) return `<div class="glow" data-ch="${d.ch}" style="--c:${d.color};left:${p.x}%;top:${p.y}%"></div>`;
     if(d.icon==='ac')      return `<div class="glow cool" data-ch="${d.ch}" style="--c:${d.color};left:${p.x}%;top:${p.y}%"></div>`;
     return ''; }).join('');
@@ -491,26 +564,56 @@ function setDev(txt){
 }
 function connect(){
   if(client){ try{ client.end(true); }catch(e){} client = null; }
-  if(!window.mqtt){ setConn('error','MQTT library not loaded'); toast('Could not load mqtt.js — check internet or host it locally'); return; }
   if(!cfg.url){ setConn('off','Set up broker'); openSettings(); return; }
+  cfg.url = appUrl(cfg.url); lastToast = '';
+  const tcp = /^(mqtt|tcp):\/\//i.test(cfg.url);
+  if(tcp && !window.Android){ setConn('error','Needs ws:// in browser'); toast('Browsers can only use a ws:// WebSocket URL'); return; }
+  if(!tcp && !window.mqtt){ setConn('error','MQTT library not loaded'); toast('MQTT library missing — rebuild the app'); return; }
   setConn('wait','Connecting…');
-  try{
-    client = mqtt.connect(cfg.url, {
-      username: cfg.user || undefined, password: cfg.pass || undefined,
-      clientId: 'roomctl_' + Math.random().toString(16).slice(2,10),
-      reconnectPeriod: 3000, connectTimeout: 8000, clean: true, keepalive: 30
-    });
-  }catch(e){ setConn('error','Bad URL'); toast(e.message); return; }
+  const opts = {
+    username: cfg.user || undefined, password: cfg.pass || undefined,
+    clientId: 'roomctl_' + Math.random().toString(16).slice(2,10),
+    reconnectPeriod: 3000, connectTimeout: 8000, clean: true, keepalive: 30
+  };
+  try{ client = tcp ? nativeClient(cfg.url, opts) : mqtt.connect(cfg.url, opts); }
+  catch(e){ setConn('error','Bad URL'); toast(e.message); return; }
   client.on('connect', ()=>{
-    setConn('on','Connected');
+    setConn('on','Connected'); lastToast = '';
     const b = cfg.base;
     client.subscribe([`stat/${b}/+`, `tele/${b}/STATE`, `tele/${b}/LWT`]);
     client.publish(`cmnd/${b}/STATE`, '');   // ask Tasmota for all relay states
   });
   client.on('reconnect', ()=>setConn('wait','Reconnecting…'));
   client.on('offline', ()=>setConn('off','Offline'));
-  client.on('error', e=>setConn('error', e && e.message ? e.message.slice(0,30) : 'Error'));
+  client.on('error', e=>{ const m = e && e.message ? e.message : 'Error'; setConn('error', m.length>34 ? m.slice(0,32)+'…' : m);
+    if(m !== lastToast){ lastToast = m; toast('MQTT: ' + m); } });
   client.on('message', onMsg);
+}
+let lastToast = '';
+/* Native MQTT (Android app, plain TCP 1883) with the same interface as mqtt.js */
+function nativeClient(url, o){
+  const u = url.match(/^(?:mqtt|tcp):\/\/([^:\/]+)(?::(\d+))?/i);
+  if(!u) throw new Error('Use mqtt://host:1883');
+  const host = u[1], port = +(u[2] || 1883), h = {};
+  const emit = (ev, ...a) => (h[ev]||[]).forEach(f=>{ try{ f(...a); }catch(e){ console.error(e); } });
+  const c = {
+    connected: false,
+    on(ev, fn){ (h[ev] = h[ev] || []).push(fn); return c; },
+    subscribe(t){ [].concat(t).forEach(x=>Android.mqttSubscribe(x)); return c; },
+    publish(t, p){ Android.mqttPublish(t, String(p)); return c; },
+    end(){ c.connected = false; if(window.__mq === handler) window.__mq = null; Android.mqttDisconnect(); },
+    reconnect(){ Android.mqttConnect(host, port, o.username||'', o.password||'', o.clientId||''); }
+  };
+  const handler = (ev, a, b) => {
+    if(ev==='connect'){ c.connected = true; emit('connect'); }
+    else if(ev==='close'){ c.connected = false; emit('close'); }
+    else if(ev==='reconnect') emit('reconnect');
+    else if(ev==='error') emit('error', new Error(a));
+    else if(ev==='message') emit('message', a, { toString: () => b });
+  };
+  window.__mq = handler;
+  setTimeout(()=>c.reconnect(), 0);
+  return c;
 }
 const norm = v => /^(on|1|true)$/i.test(String(v).trim()) ? 'ON' : /^(off|0|false)$/i.test(String(v).trim()) ? 'OFF' : null;
 function setPower(ch, val){
@@ -550,7 +653,7 @@ async function runMap(map, label){
 }
 
 /* =================== EVENTS =================== */
-const vib = ms => { try{ navigator.vibrate && navigator.vibrate(ms); }catch(e){} };
+const vib = ms => { try{ if(window.Android) Android.vibrate(ms); else if(navigator.vibrate) navigator.vibrate(ms); }catch(e){} };
 const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
 function activate(i){
   const d = devices[i]; if(!d) return;
@@ -577,7 +680,7 @@ document.addEventListener('pointermove', e=>{
     const r = $('#room').getBoundingClientRect();
     press.nx = clamp((e.clientX-r.left)/r.width*100, 4, 96);
     press.ny = clamp((e.clientY-r.top)/r.height*100, 5, 95);
-    press.el.style.left = edge(press.nx); press.el.style.top = edge(press.ny);
+    Object.assign(press.el.style, place(devices[press.i], press.nx, press.ny));
     press.el.classList.add('dragging');
   }
 });
@@ -616,6 +719,9 @@ function openEditor(i){
   drawEditor(); $('#editOv').classList.add('show');
 }
 function drawEditor(){
+  document.querySelectorAll('#eShape button').forEach(b=>b.classList.toggle('sel', (draft.shape||'')===b.dataset.shape));
+  $('#eLenRow').style.display = draft.shape ? '' : 'none';
+  $('#eLen').value = draft.len || 40; $('#eLenV').textContent = draft.len || 40;
   $('#eIcons').style.setProperty('--c', draft.color);
   $('#eIcons').innerHTML = Object.keys(ICONS).filter(k=>!['power','moon'].includes(k))
     .map(k=>`<button data-icon="${k}" class="${k===draft.icon?'sel':''}" title="${k}">${icon(k)}</button>`).join('');
@@ -629,6 +735,11 @@ function preview(){
   $('#ePrev').innerHTML = tileHTML(p, -1); power[p.ch] = saved;
   if(saved === undefined) delete power[p.ch];
 }
+$('#eShape').onclick = e=>{ const b = e.target.closest('[data-shape]'); if(!b) return;
+  draft.shape = b.dataset.shape; if(draft.shape && !draft.len) draft.len = 40;
+  if(draft.shape && !['strip','floor','wall','bulb'].includes(draft.icon) && draft.zone==='Lighting') draft.icon = 'strip';
+  drawEditor(); };
+$('#eLen').oninput = e=>{ draft.len = +e.target.value; $('#eLenV').textContent = draft.len; };
 $('#eIcons').onclick = e=>{ const b = e.target.closest('[data-icon]'); if(b){ draft.icon = b.dataset.icon; drawEditor(); } };
 $('#eColors').onclick = e=>{ const b = e.target.closest('[data-color]'); if(b){ draft.color = b.dataset.color; drawEditor(); } };
 $('#eName').oninput = e=>{ draft.name = e.target.value; preview(); };
@@ -637,6 +748,7 @@ $('#eCh').onchange = e=>{ draft.ch = +e.target.value; preview(); };
 $('#eCancel').onclick = ()=> $('#editOv').classList.remove('show');
 $('#eSave').onclick = ()=>{
   draft.name = draft.name.trim() || 'Device';
+  if(!draft.shape) delete draft.shape;
   devices[editIdx] = draft; store.set('rc.devices', devices);
   $('#editOv').classList.remove('show'); render(); toast('Saved');
 };
@@ -644,7 +756,7 @@ $('#eSave').onclick = ()=>{
 /* ---- settings ---- */
 function openSettings(){
   $('#sRoom').value = cfg.room; $('#sUrl').value = cfg.url; $('#sUser').value = cfg.user;
-  $('#sPass').value = cfg.pass; $('#sBase').value = cfg.base; syncTb();
+  $('#sPass').value = cfg.pass; $('#sBase').value = cfg.base; $('#sAwake').checked = !!cfg.awake; syncTb();
   $('#setOv').classList.add('show');
 }
 function syncTb(){ document.querySelectorAll('.tb').forEach(s=>s.textContent = $('#sBase').value || 'o2/villa/21'); }
@@ -652,8 +764,8 @@ $('#sBase').oninput = syncTb;
 $('#sCancel').onclick = ()=> $('#setOv').classList.remove('show');
 $('#sSave').onclick = ()=>{
   cfg = { room: $('#sRoom').value.trim() || 'Room', url: $('#sUrl').value.trim(), user: $('#sUser').value.trim(),
-          view: cfg.view, pass: $('#sPass').value, base: ($('#sBase').value.trim() || 'o2/villa/21').replace(/^\/+|\/+$/g,'') };
-  store.set('rc.cfg', cfg); $('#setOv').classList.remove('show');
+          view: cfg.view, awake: $('#sAwake').checked, pass: $('#sPass').value, base: ($('#sBase').value.trim() || 'o2/villa/21').replace(/^\/+|\/+$/g,'') };
+  store.set('rc.cfg', cfg); applyAwake(); $('#setOv').classList.remove('show');
   Object.keys(power).forEach(k=>delete power[k]); render(); connect();
 };
 $('#sReset').onclick = ()=>{
@@ -670,6 +782,21 @@ function tick(){
   $('#clock').textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden && client && client.connected) client.publish(`cmnd/${cfg.base}/STATE`, ''); });
+
+/* ---- Android app hooks ---- */
+function applyAwake(){ try{ window.Android && Android.keepScreenOn(!!cfg.awake); }catch(e){} }
+if(!window.Android) $('#awakeRow').style.display = 'none';
+window.handleBack = function(){            // called by the Android Back button
+  const open = document.querySelector('.ov.show');
+  if(open){ open.classList.remove('show'); return true; }
+  if(editing){ $('#editBtn').click(); return true; }
+  return false;
+};
+window.onAppResume = function(){           // app brought back to foreground
+  if(client && client.connected) client.publish(`cmnd/${cfg.base}/STATE`, '');
+  else if(client) { try{ client.reconnect(); }catch(e){ connect(); } }
+};
+applyAwake();
 
 tick(); setInterval(tick, 15000);
 setView(cfg.view || 'room');

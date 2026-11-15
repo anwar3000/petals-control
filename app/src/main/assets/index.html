@@ -172,6 +172,29 @@ body[data-view=grid] #roomView{display:none}
 .editing .spot .b{outline:2px dashed rgba(255,255,255,.55);outline-offset:4px}
 .spot.dragging{z-index:9}
 .spot.dragging .b{transform:scale(1.18);box-shadow:0 12px 30px rgba(0,0,0,.6)}
+.spot.strip{--s:42px}
+.spot.strip .b{border-radius:999px;gap:6px}
+.spot.strip.h .b{display:flex;align-items:center;justify-content:center}
+.spot.strip.v .b{display:flex;flex-direction:column;align-items:center;justify-content:center}
+.spot.strip .b::before{content:"";position:absolute;border-radius:999px;background:rgba(255,255,255,.1);transition:.35s}
+.spot.strip.h .b::before{left:16px;right:16px;height:3px;bottom:6px}
+.spot.strip.v .b::before{top:16px;bottom:16px;width:3px;right:6px}
+.spot.strip.on .b::before{background:rgba(255,255,255,.85);box-shadow:0 0 10px #fff}
+.spot.strip .b svg.i{width:24px;height:24px}
+.spot.strip.v .lb{top:auto;bottom:calc(100% + 6px)}
+.spot.strip.v .b svg.i{transform:rotate(90deg)}
+.spot.strip.on .b{box-shadow:0 0 0 5px color-mix(in srgb,var(--c) 25%,transparent),0 0 40px var(--c),0 0 80px color-mix(in srgb,var(--c) 50%,transparent)}
+.spot.strip.pending .b::after{border-radius:999px}
+.glow.line{aspect-ratio:auto;border-radius:50%;
+  background:radial-gradient(closest-side,color-mix(in srgb,var(--c) 58%,transparent),color-mix(in srgb,var(--c) 20%,transparent) 55%,transparent)}
+.glow.line.h{height:30%}
+.glow.line.v{width:30%}
+.segs{display:flex;gap:6px}
+.segs button{flex:1;padding:11px 8px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.04);cursor:pointer;
+  font-size:13.5px;font-weight:600;color:var(--mute);display:flex;align-items:center;justify-content:center;gap:7px}
+.segs button.sel{background:#fff;color:#0b0f17;border-color:#fff}
+.segs i{display:inline-block;background:currentColor;border-radius:9px}
+input[type=range]{padding:0;height:34px;accent-color:#7dd3fc;background:none;border:0}
 .roomhint{font-size:12.5px;color:var(--mute);text-align:center;margin:-6px 0 14px}
 @keyframes breathe{50%{opacity:.55}}
 @media (max-width:600px){
@@ -312,6 +335,14 @@ code{font-size:12px;background:rgba(255,255,255,.07);padding:1px 6px;border-radi
       <div><label>Group</label><select id="eZone"></select></div>
       <div><label>Relay channel</label><select id="eCh"></select></div>
     </div>
+    <label>Shape on room map</label>
+    <div class="segs" id="eShape">
+      <button data-shape=""><i style="width:14px;height:14px;border-radius:50%"></i>Round</button>
+      <button data-shape="h"><i style="width:26px;height:7px"></i>Strip</button>
+      <button data-shape="v"><i style="width:7px;height:22px"></i>Strip</button>
+    </div>
+    <div id="eLenRow"><label>Strip length — <span id="eLenV"></span>% of room</label>
+      <input type="range" id="eLen" min="10" max="94" step="1"></div>
     <label>Icon</label>
     <div class="icons" id="eIcons"></div>
     <label>Colour</label>
@@ -359,10 +390,11 @@ const DEFAULT_DEVICES = [
   {ch:5, name:'Air Conditioner',   icon:'ac',        color:'#38bdf8', zone:'Climate',  x:84, y:10},
   {ch:2, name:'Ceiling Fan',       icon:'fan',       color:'#a78bfa', zone:'Climate',  x:50, y:33},
   {ch:4, name:'Projector',         icon:'projector', color:'#f472b6', zone:'Media',    x:50, y:65},
-  {ch:8, name:'Right Side Socket', icon:'socket',    color:'#34d399', zone:'Media',    x:94, y:52},
-  {ch:1, name:'Wall Light',        icon:'wall',      color:'#fbbf24', zone:'Lighting', x:6,  y:42},
-  {ch:3, name:'Floor Light Right', icon:'floor',     color:'#fb923c', zone:'Lighting', x:89, y:85},
-  {ch:7, name:'Floor Light Left',  icon:'floor',     color:'#fb923c', zone:'Lighting', x:11, y:85},
+  {ch:8, name:'Right Side Socket', icon:'socket',    color:'#34d399', zone:'Media',    x:93, y:30},
+  {ch:1, name:'Wall Light',        icon:'wall',      color:'#fbbf24', zone:'Lighting', x:7,  y:26},
+  /* shape: '' = round button, 'h' = horizontal strip, 'v' = vertical strip; len = strip length in % of the room */
+  {ch:3, name:'Floor Light Right', icon:'strip',     color:'#fb923c', zone:'Lighting', x:96, y:74, shape:'v', len:38},
+  {ch:7, name:'Floor Light Left',  icon:'strip',     color:'#fb923c', zone:'Lighting', x:4,  y:74, shape:'v', len:38},
   {ch:6, name:'Small Light Back',  icon:'bulb',      color:'#facc15', zone:'Lighting', x:50, y:92},
 ];
 const LIGHTS = new Set(['bulb','floor','wall','strip']);
@@ -389,7 +421,7 @@ const ICONS = {
   wall:`<g class="rays"><path d="M13 19.5l-1 2M17 19.5l1 2M21 18l1.5 1"/></g><path d="M3 4v16"/><path d="M3 12h4"/><path d="M8 7.5h7.5l4 9.5H7.5z"/>`,
   tv:`<rect x="2" y="4" width="20" height="13" rx="2.5"/><path d="M8 21h8M12 17v4"/>`,
   plug:`<path d="M9 2v5M15 2v5"/><path d="M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v5"/>`,
-  strip:`<path class="rays" d="M5 9V7M10 9V7M15 9V7M20 9V7"/><rect x="2" y="10" width="20" height="4" rx="2"/><path d="M5 17v-0M10 17v0"/>`,
+  strip:`<path class="rays" d="M5 8V6M10 8V6M15 8V6M20 8V6M5 18v-2M10 18v-2M15 18v-2M20 18v-2"/><rect x="2" y="10" width="20" height="4" rx="2"/><path d="M6 12h.01M10 12h.01M14 12h.01M18 12h.01"/>`,
   power:`<path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>`,
   moon:`<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>`,
   speaker:`<rect x="5" y="2" width="14" height="20" rx="3"/><circle cx="12" cy="14" r="3.5"/><circle cx="12" cy="6.5" r="1"/>`,
@@ -403,8 +435,14 @@ const store = {
   get(k,d){ try{ const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } },
   set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
 };
-const defUrl = 'mqtt://192.168.10.5:1883';   // local MQTT broker (plain TCP, handled natively by the app)
+const defUrl = window.Android ? 'mqtt://192.168.10.5:1883'   // app: plain MQTT (native client)
+                              : 'ws://192.168.10.5:1884';   // browser: MQTT over WebSockets
 let devices = store.get('rc.devices', null) || JSON.parse(JSON.stringify(DEFAULT_DEVICES));
+if(!store.get('rc.v2', false)){            // one-time upgrade: floor lights become strips
+  devices.forEach(d=>{ const def = DEFAULT_DEVICES.find(x=>x.ch===d.ch);
+    if(def && def.shape && !d.shape) Object.assign(d, {shape:def.shape, len:def.len, icon:def.icon, x:def.x, y:def.y}); });
+  store.set('rc.devices', devices); store.set('rc.v2', true);
+}
 let cfg = Object.assign({room:'Villa 21', url:defUrl, user:'', pass:'', base:'o2/villa/21'}, store.get('rc.cfg', {}));
 if(/^ws:\/\/192\.168\.10\.5:(1880\/mqtt|9001)$/.test(cfg.url)) cfg.url = defUrl;   // migrate old default
 /* In the app: plain MQTT for bare host[:port], tcp/mqtt URLs, or anything pointing at port 1883 */
@@ -465,15 +503,28 @@ function pos(d){
 }
 const edge = v => `clamp(calc(var(--s)/2 + 9px), ${v}%, calc(100% - var(--s)/2 - 9px))`;
 function spotCls(d){
-  const p = pos(d), st = power[d.ch];
-  return ['spot', st==='ON'?'on':'', st?'':'unknown', pending[d.ch]?'pending':'',
-          p.y>72?'up':'', p.x<16?'l':'', p.x>84?'r':''].join(' ');
+  const p = pos(d), st = power[d.ch], sh = d.shape;
+  return ['spot', sh ? 'strip '+sh : '', st==='ON'?'on':'', st?'':'unknown', pending[d.ch]?'pending':'',
+          (!sh || sh==='h') && p.y>72 ? 'up' : '', p.x<16?'l':'', p.x>84?'r':''].join(' ');
 }
+/* position/size of a device on the map (strips get length, kept inside the room) */
+function place(d, x, y){
+  const p = x==null ? pos(d) : {x, y};
+  if(d.shape==='h' || d.shape==='v'){
+    const L = d.len || 40, half = L/2 + 1.5;
+    if(d.shape==='h') return {left: clamp(p.x, half, 100-half)+'%', top: edge(p.y), width: L+'%', height: ''};
+    return {left: edge(p.x), top: clamp(p.y, half, 100-half)+'%', width: '', height: L+'%'};
+  }
+  return {left: edge(p.x), top: edge(p.y), width: '', height: ''};
+}
+const css = o => Object.entries(o).filter(([k,v])=>v!=='').map(([k,v])=>`${k}:${v}`).join(';');
 function renderRoom(){
   $('#spots').innerHTML = devices.map((d,i)=>{ const p = pos(d);
-    return `<button class="${spotCls(d)}" data-i="${i}" data-ch="${d.ch}" style="--c:${d.color};left:${edge(p.x)};top:${edge(p.y)}" aria-label="${esc(d.name)}">
+    return `<button class="${spotCls(d)}" data-i="${i}" data-ch="${d.ch}" style="--c:${d.color};${css(place(d))}" aria-label="${esc(d.name)}">
       <span class="b">${icon(d.icon)}</span><span class="lb">${esc(d.name)}</span></button>`; }).join('');
   $('#glows').innerHTML = devices.map(d=>{ const p = pos(d);
+    if(d.shape && (LIGHTS.has(d.icon) || d.zone==='Lighting')){ const pl = place(d), L = (d.len||40) + 26;
+      return `<div class="glow line ${d.shape}" data-ch="${d.ch}" style="--c:${d.color};left:${pl.left};top:${pl.top};${d.shape==='h'?'width':'height'}:${L}%"></div>`; }
     if(LIGHTS.has(d.icon)) return `<div class="glow" data-ch="${d.ch}" style="--c:${d.color};left:${p.x}%;top:${p.y}%"></div>`;
     if(d.icon==='ac')      return `<div class="glow cool" data-ch="${d.ch}" style="--c:${d.color};left:${p.x}%;top:${p.y}%"></div>`;
     return ''; }).join('');
@@ -629,7 +680,7 @@ document.addEventListener('pointermove', e=>{
     const r = $('#room').getBoundingClientRect();
     press.nx = clamp((e.clientX-r.left)/r.width*100, 4, 96);
     press.ny = clamp((e.clientY-r.top)/r.height*100, 5, 95);
-    press.el.style.left = edge(press.nx); press.el.style.top = edge(press.ny);
+    Object.assign(press.el.style, place(devices[press.i], press.nx, press.ny));
     press.el.classList.add('dragging');
   }
 });
@@ -668,6 +719,9 @@ function openEditor(i){
   drawEditor(); $('#editOv').classList.add('show');
 }
 function drawEditor(){
+  document.querySelectorAll('#eShape button').forEach(b=>b.classList.toggle('sel', (draft.shape||'')===b.dataset.shape));
+  $('#eLenRow').style.display = draft.shape ? '' : 'none';
+  $('#eLen').value = draft.len || 40; $('#eLenV').textContent = draft.len || 40;
   $('#eIcons').style.setProperty('--c', draft.color);
   $('#eIcons').innerHTML = Object.keys(ICONS).filter(k=>!['power','moon'].includes(k))
     .map(k=>`<button data-icon="${k}" class="${k===draft.icon?'sel':''}" title="${k}">${icon(k)}</button>`).join('');
@@ -681,6 +735,11 @@ function preview(){
   $('#ePrev').innerHTML = tileHTML(p, -1); power[p.ch] = saved;
   if(saved === undefined) delete power[p.ch];
 }
+$('#eShape').onclick = e=>{ const b = e.target.closest('[data-shape]'); if(!b) return;
+  draft.shape = b.dataset.shape; if(draft.shape && !draft.len) draft.len = 40;
+  if(draft.shape && !['strip','floor','wall','bulb'].includes(draft.icon) && draft.zone==='Lighting') draft.icon = 'strip';
+  drawEditor(); };
+$('#eLen').oninput = e=>{ draft.len = +e.target.value; $('#eLenV').textContent = draft.len; };
 $('#eIcons').onclick = e=>{ const b = e.target.closest('[data-icon]'); if(b){ draft.icon = b.dataset.icon; drawEditor(); } };
 $('#eColors').onclick = e=>{ const b = e.target.closest('[data-color]'); if(b){ draft.color = b.dataset.color; drawEditor(); } };
 $('#eName').oninput = e=>{ draft.name = e.target.value; preview(); };
@@ -689,6 +748,7 @@ $('#eCh').onchange = e=>{ draft.ch = +e.target.value; preview(); };
 $('#eCancel').onclick = ()=> $('#editOv').classList.remove('show');
 $('#eSave').onclick = ()=>{
   draft.name = draft.name.trim() || 'Device';
+  if(!draft.shape) delete draft.shape;
   devices[editIdx] = draft; store.set('rc.devices', devices);
   $('#editOv').classList.remove('show'); render(); toast('Saved');
 };
