@@ -538,7 +538,7 @@ function status(){
     if(devOnline === false){ kind = 'off'; txt = 'Device offline'; dim = true; }
     else { kind = 'on'; txt = `MQTT · ${brokerHost()} · ${cnt}`; }
   } else if(cfg.mode !== 'mqtt' && httpOk){
-    kind = 'on'; txt = `Direct · ${(cfg.ip||'').trim()} · ${cnt}`;
+    kind = 'on'; txt = `Direct · ${(cfg.ip||'').trim()} · ${corsBlocked && !APP ? 'send only' : cnt}`;
   } else if(cfg.mode === 'http'){
     kind = httpOk === false ? 'off' : 'wait'; txt = httpOk === false ? (httpErr || 'Device not reachable') : 'Connecting to device…'; dim = httpOk === false;
   } else if(cfg.mode === 'auto' && httpOk === false && conn.kind !== 'wait'){
@@ -667,7 +667,13 @@ function applyPower(j){
 }
 
 /* =================== DIRECT (Tasmota web API) =================== */
-let httpSeq = 0; const httpCbs = {};
+let httpSeq = 0, corsBlocked = false; const httpCbs = {};
+function guessReply(cmnd){               // expected Tasmota reply when the browser can't read the real one
+  const m = cmnd.match(/^Power(\d+) (ON|OFF|TOGGLE)$/i); if(!m) return {};
+  const n = +m[1], v = m[2].toUpperCase(), flip = ch => power[ch] === 'ON' ? 'OFF' : 'ON';
+  if(n === 0){ const o = {}; devices.forEach(d=>o['POWER'+d.ch] = v === 'TOGGLE' ? flip(d.ch) : v); return o; }
+  return {['POWER'+n]: v === 'TOGGLE' ? flip(n) : v};
+}
 window.__http = (id, code, body) => { const cb = httpCbs[id]; if(cb){ delete httpCbs[id]; cb(code, body); } };
 function httpCmd(cmnd){
   const ip = (cfg.ip || '').trim().replace(/^https?:\/\//i,'').replace(/\/+$/,'');
@@ -688,11 +694,20 @@ function httpCmd(cmnd){
       httpCbs[id] = (code, body) => { clearTimeout(t); try{ resolve(parse(code, body)); }catch(e){ reject(e); } };
       Android.httpGet(id, url, 4000);
     } else {
+      /* Browser: read the reply if the Tasmota allows it (CORS). If not, still send the command
+         ("no-cors") — the device gets it, we just can't read the answer, so the expected state is shown. */
       const ac = new AbortController(), t = setTimeout(()=>ac.abort(), 5000);
+      const blind = () => fetch(url, {mode: 'no-cors', signal: ac.signal, cache: 'no-store'})
+        .then(()=>{ clearTimeout(t); resolve(guessReply(cmnd)); })
+        .catch(()=>{ clearTimeout(t); reject(new Error('Device not reachable')); });
+      if(corsBlocked) return blind();
       fetch(url, {signal: ac.signal, cache: 'no-store'})
         .then(r => r.text().then(b => { clearTimeout(t); resolve(parse(r.status, b)); }))
-        .catch(e => reject(e.name === 'AbortError' ? new Error('Device not reachable') :
-               e instanceof SyntaxError || /Device|password/.test(e.message) ? e : new Error('Blocked by browser (needs CORS on Tasmota)')));
+        .catch(e => {
+          if(e.name === 'AbortError'){ clearTimeout(t); reject(new Error('Device not reachable')); }
+          else if(e instanceof TypeError){ corsBlocked = true; blind(); }      // CORS / network → try blind send
+          else { clearTimeout(t); reject(e); }
+        });
     }
   });
 }
@@ -836,7 +851,7 @@ function openSettings(){
   $('#urlHint').innerHTML = APP ? 'Plain MQTT, e.g. <code>192.168.10.5:1883</code>' : 'Browser uses MQTT over WebSockets, e.g. <code>ws://192.168.10.5:1884</code>';
   $('#sIp').value = cfg.ip || ''; $('#sWebPass').value = cfg.webpass || '';
   $('#httpHint').innerHTML = APP ? 'The Tasmota’s own address (Tasmota console shows it at boot).'
-    : 'In a browser this needs CORS enabled on the Tasmota. The Android app works without it.';
+    : 'In a browser, commands work directly; live on/off status needs CORS enabled on the Tasmota. The Android app needs nothing extra.';
   smode = cfg.mode || 'auto'; drawMode();
   $('#setOv').classList.add('show');
 }
