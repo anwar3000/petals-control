@@ -1,8 +1,10 @@
 package ae.llct.roomcontrol;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -11,12 +13,18 @@ import android.os.Vibrator;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 /**
  * Villa 21 Room Control — wraps the bundled web UI (assets/index.html) in a full-screen WebView.
@@ -26,6 +34,7 @@ public class MainActivity extends Activity {
 
     private WebView web;
     private NativeMqtt mqtt;
+    private PermissionRequest pendingPerm;
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
@@ -47,7 +56,23 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
 
         web.setWebViewClient(new WebViewClient());
-        web.setWebChromeClient(new WebChromeClient());   // enables confirm()/alert() dialogs
+        // enables confirm()/alert() dialogs + microphone for Music mode
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(final PermissionRequest req) {
+                runOnUiThread(() -> {
+                    boolean audio = false;
+                    for (String r : req.getResources()) if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(r)) audio = true;
+                    if (!audio) { req.deny(); return; }
+                    if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                        req.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+                    } else {
+                        pendingPerm = req;
+                        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 7);
+                    }
+                });
+            }
+        });
         // Native MQTT over TCP (port 1883) — events are forwarded to window.__mq(event, a, b) in the page
         mqtt = new NativeMqtt((ev, a, b) -> runOnUiThread(() -> {
             if (web != null) web.evaluateJavascript("window.__mq&&__mq(" + JSONObject.quote(ev) + ","
@@ -85,10 +110,43 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void mqttDisconnect() { mqtt.disconnect(); }
         @JavascriptInterface public boolean mqttConnected() { return mqtt.isConnected(); }
 
+        /** Direct Tasmota web API call (no CORS limits). Result -> window.__http(id, httpCode, body) */
+        @JavascriptInterface public void httpGet(final String id, final String url, final int timeoutMs) {
+            new Thread(() -> {
+                int code = 0; String body = "";
+                try {
+                    HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
+                    c.setConnectTimeout(timeoutMs); c.setReadTimeout(timeoutMs); c.setUseCaches(false);
+                    code = c.getResponseCode();
+                    InputStream in = code >= 400 ? c.getErrorStream() : c.getInputStream();
+                    if (in != null) {
+                        ByteArrayOutputStream b = new ByteArrayOutputStream(); byte[] buf = new byte[4096]; int n;
+                        while ((n = in.read(buf)) > 0) b.write(buf, 0, n);
+                        body = b.toString("UTF-8"); in.close();
+                    }
+                    c.disconnect();
+                } catch (Exception e) { code = 0; body = String.valueOf(e.getMessage()); }
+                final int fc = code; final String fb = body;
+                runOnUiThread(() -> { if (web != null) web.evaluateJavascript(
+                        "window.__http&&__http(" + JSONObject.quote(id) + "," + fc + "," + JSONObject.quote(fb) + ")", null); });
+            }, "http").start();
+        }
+
         @JavascriptInterface
         public String version() {
             try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
             catch (Exception e) { return ""; }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode == 7 && pendingPerm != null) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
+                pendingPerm.grant(new String[]{PermissionRequest.RESOURCE_AUDIO_CAPTURE});
+            else pendingPerm.deny();
+            pendingPerm = null;
         }
     }
 

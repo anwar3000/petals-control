@@ -15,13 +15,18 @@ Touch control panel for Villa 21 — room-plan view + button view, live status f
 
 Commands: `cmnd/o2/villa/21/POWERn` (ON / OFF / TOGGLE) · Status: `stat/o2/villa/21/POWERn`, `stat/…/RESULT`, `tele/…/LWT`
 
-## 1. Broker
+## 1. Connection (Settings → Connection)
 
-The Android app connects **directly to plain MQTT** at **mqtt://192.168.10.5:1883** (built-in native MQTT client — no WebSocket listener needed).
-Change it in ⚙ Settings → Broker URL. Enter username/password there if your broker needs them.
+- **Auto** (default) — MQTT `192.168.10.5:1883`; if the broker fails, the app talks to the Tasmota directly
+  at `http://192.168.10.72` and switches back when MQTT returns. The top line shows which: `MQTT · 192.168.10.5` or `Direct · 192.168.10.72`.
+- **MQTT** — broker only.  **Direct** — Tasmota web API only (`/cm?cmnd=Power5 ON`, status via `State`). Enter the web password if one is set.
 
-The *browser* version (room-control.html) can't open raw TCP, so it needs a WebSocket URL (`ws://192.168.10.5:1884`) —
-e.g. Mosquitto `listener 9001` + `protocol websockets`.
+The browser version (web/room-control.html) uses `ws://192.168.10.5:1884`; Direct in a browser needs CORS enabled on the Tasmota.
+
+## Music mode
+
+Quick button **Music** → lights follow the beat (phone microphone) or a set tempo. Patterns: Flash, Chase, Left/Right, Random.
+Only the chosen lights are switched; a minimum switching interval protects the relays; stops after 30 min and restores the lights.
 
 ## 2. Build the APK (no Android Studio needed)
 
