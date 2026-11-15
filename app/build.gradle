@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'ae.llct.roomcontrol'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'ae.llct.roomcontrol'
+        minSdk 26
+        targetSdk 34
+        // CI sets GITHUB_RUN_NUMBER so every build installs as an update
+        versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int)
+        versionName "1.0.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
+    }
+
+    signingConfigs {
+        release {
+            // Fixed key so new builds install over the old one. Keep this repo private.
+            storeFile rootProject.file('keystore/release.jks')
+            storePassword 'villa21pass'
+            keyAlias 'roomcontrol'
+            keyPassword 'villa21pass'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all { outputFileName = "Villa21-RoomControl-${variant.versionName}.apk" }
+    }
+}
